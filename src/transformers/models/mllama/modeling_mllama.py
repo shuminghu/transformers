@@ -2051,6 +2051,15 @@ class MllamaForConditionalGeneration(MllamaPreTrainedModel, GenerationMixin):
             config.text_config.hidden_size,
             bias=True,
         )
+        self.video_aggregation = None
+        if config.add_video_adapter:
+            if config.video_adapter.name == "mp_perceiver":
+                self.video_aggregation = MPPerceiverResampler(config)
+            else:
+                raise ValueError(
+                    f"Unsupported video adapter name: {config.video_adapter.name}"
+                )
+
         self.post_init()
 
     def get_input_embeddings(self):
@@ -2170,6 +2179,8 @@ class MllamaForConditionalGeneration(MllamaPreTrainedModel, GenerationMixin):
                 return_dict=return_dict,
             )
             cross_attention_states = vision_outputs[0]
+            if self.video_aggregation:
+                cross_attention_states = self.video_aggregation(cross_attention_states)
             cross_attention_states = self.multi_modal_projector(cross_attention_states).reshape(
                 -1, cross_attention_states.shape[-2], self.hidden_size
             )
