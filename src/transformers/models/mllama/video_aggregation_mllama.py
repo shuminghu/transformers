@@ -16,7 +16,7 @@
 import math
 
 from transformers.models.mllama.configuration_mllama import MllamaVisionConfig
-from transformers.models.mllama.modeling_mllama import MllamaPrecomputedAspectRatioEmbedding, MllamaVisionEncoder
+# from transformers.models.mllama.modeling_mllama import MllamaPrecomputedAspectRatioEmbedding, MllamaVisionEncoder
 from ...utils import TensorType, logging
 
 
@@ -48,13 +48,13 @@ class MPPerceiverAttention(nn.Module):
         self.norm_media = LayerNorm(dim)
         self.norm_latents = LayerNorm(dim)
 
-        self.to_q = nn.linear(
+        self.to_q = nn.Linear(
             dim, inner_dim, bias=False,
         )
-        self.to_kv = nn.linear(
+        self.to_kv = nn.Linear(
             dim, inner_dim * 2, bias=False,
         )
-        self.to_out = nn.linear(
+        self.to_out = nn.Linear(
             inner_dim, dim, bias=False,
         )
 
@@ -93,12 +93,12 @@ class MPFeedForward(torch.nn.Module):
     ):
         super().__init__()
         # layers
-        self.c_fc = nn.linear(
+        self.c_fc = nn.Linear(
             dim,
             hidden_dim,
             bias=bias,
         )
-        self.c_proj = nn.linear(
+        self.c_proj = nn.Linear(
             hidden_dim,
             dim,
             bias=bias,
@@ -236,10 +236,10 @@ class MPPerceiverResampler(nn.Module):
             # input_dim to dim
             assert dim != self.input_dim
             self.dim = dim
-            self.pre_proj = nn.linear(
+            self.pre_proj = nn.Linear(
                 self.input_dim, self.dim, bias=True,
             )
-            self.post_proj = nn.linear(
+            self.post_proj = nn.Linear(
                 self.dim, self.input_dim, bias=True,
             )
         else:
@@ -270,7 +270,8 @@ class MPPerceiverResampler(nn.Module):
         self.post_tile_pos_embed = None
         if add_post_tile_pos_embed:
             # reference: https://www.internalfb.com/code/fbsource/[95374dc8728e]/fbcode/gen_ai/mllm/inference/llama3/model/video.py?lines=282
-            self.post_tile_pos_embed = MllamaPrecomputedAspectRatioEmbedding(config)
+            # self.post_tile_pos_embed = MllamaPrecomputedAspectRatioEmbedding(config)
+            raise NotImplementedError("Post tile position embedding is not implemented")
         self.post_global_attention = None
         if num_post_global_attention is not None:
             perceiver_global_attention_config = config.copy()
@@ -278,8 +279,9 @@ class MPPerceiverResampler(nn.Module):
             perceiver_global_attention_config.attention_heads = heads
             perceiver_global_attention_config.intermediate_size = ff_mult * dim_head * heads
             # reference: https://www.internalfb.com/code/fbsource/[95374dc8728e]/fbcode/gen_ai/mllm/inference/llama3/model/video.py?lines=288
-            self.post_global_attention = MllamaVisionEncoder(perceiver_global_attention_config, num_layers=num_post_global_attention, is_gated=False)
-
+            # self.post_global_attention = MllamaVisionEncoder(perceiver_global_attention_config, num_layers=num_post_global_attention, is_gated=False)
+            raise NotImplementedError("Post global attention is not implemented")
+        
         self.norm = LayerNorm(self.dim)
 
 

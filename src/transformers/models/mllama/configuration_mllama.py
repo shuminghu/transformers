@@ -106,6 +106,7 @@ class MllamaVisionConfig(PretrainedConfig):
         intermediate_layers_indices: Optional[List[int]] = None,
         supported_aspect_ratios: Optional[List[List[int]]] = None,
         initializer_range: float = 0.02,
+        add_video_adapter: bool = False,
         perceiver_input_dim: int = 7680,
         perceiver_num_latents: int = 16,
         perceiver_num_layers: int = 1,
@@ -139,6 +140,7 @@ class MllamaVisionConfig(PretrainedConfig):
         self.attention_heads = num_attention_heads
         self.supported_aspect_ratios = supported_aspect_ratios
         self.initializer_range = initializer_range
+        self.add_video_adapter = add_video_adapter
         self.perceiver_input_dim = perceiver_input_dim
         self.perceiver_num_latents = perceiver_num_latents
         self.perceiver_num_layers = perceiver_num_layers
@@ -393,7 +395,6 @@ class MllamaConfig(PretrainedConfig):
         vision_config=None,
         text_config=None,
         image_token_index=128256,
-        add_video_adapter: bool = False,
         **kwargs,
     ):
         if vision_config is None:
@@ -413,7 +414,5 @@ class MllamaConfig(PretrainedConfig):
             self.text_config = MllamaTextConfig(**text_config)
         elif isinstance(text_config, MllamaTextConfig):
             self.text_config = text_config
-
-        self.add_video_adapter = add_video_adapter
 
         super().__init__(**kwargs)

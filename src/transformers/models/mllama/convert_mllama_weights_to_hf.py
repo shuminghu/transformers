@@ -47,15 +47,27 @@ ORIGINAL_TO_CONVERTED_KEY_MAPPING = {
     # For every cross attention layer, the layer needs to be updated
     r"text_model.cross_attention_layers.(\d+).gate_attn":                                       r"language_model.model.layers.\1.cross_attn_attn_gate",
     r"text_model.cross_attention_layers.(\d+).gate_ffwd":                                       r"language_model.model.layers.\1.cross_attn_mlp_gate",
+    # Save as above for video cross attention layers
+    r"text_model.video_cross_attention_layers.(\d+).gate_attn":                                 r"language_model.model.layers.\1.video_cross_attn_attn_gate",
+    r"text_model.video_cross_attention_layers.(\d+).gate_ffwd":                                 r"language_model.model.layers.\1.video_cross_attn_mlp_gate",
     # special key, wqkv needs to be split afterwards
     r"text_model.cross_attention_layers.(\d+).attention.w(q|k|v|o)":                            r"language_model.model.layers.\1.cross_attn.\2_proj",
-    r"text_model.cross_attention_layers.(\d+).attention.(q|k)_norm":                            r"language_model.model.layers.\1.cross_attn.\2_norm",
+    r"text_model.cross_attention_layers.(\d+).attention.inner_attention.(q|k)_norm":            r"language_model.model.layers.\1.cross_attn.\2_norm",
     r"text_model.cross_attention_layers.(\d+).attention_norm.weight":                           r"language_model.model.layers.\1.input_layernorm.weight",
     r"text_model.cross_attention_layers.(\d+).attention.wk.layer_norm_weight":                  r"language_model.model.layers.\1.post_attention_layernorm.weight",
     r"text_model.cross_attention_layers.(\d+).feed_forward.w1.weight":                          r"language_model.model.layers.\1.mlp.gate_proj.weight",
     r"text_model.cross_attention_layers.(\d+).feed_forward.w2.weight":                          r"language_model.model.layers.\1.mlp.down_proj.weight",
     r"text_model.cross_attention_layers.(\d+).feed_forward.w3.weight":                          r"language_model.model.layers.\1.mlp.up_proj.weight",
     r"text_model.cross_attention_layers.(\d+).ffn_norm.weight":                                 r"language_model.model.layers.\1.post_attention_layernorm.weight",
+    # Save as above for video cross attention layers
+    r"text_model.video_cross_attention_layers.(\d+).attention.w(q|k|v|o)":                      r"language_model.model.layers.\1.video_cross_attn.\2_proj",
+    r"text_model.video_cross_attention_layers.(\d+).attention.inner_attention.(q|k)_norm":      r"language_model.model.layers.\1.video_cross_attn.\2_norm",
+    r"text_model.video_cross_attention_layers.(\d+).attention_norm.weight":                     r"language_model.model.layers.\1.video_input_layernorm.weight",
+    r"text_model.video_cross_attention_layers.(\d+).attention.wk.layer_norm_weight":            r"language_model.model.layers.\1.video_post_attention_layernorm.weight",
+    r"text_model.video_cross_attention_layers.(\d+).feed_forward.w1.weight":                    r"language_model.model.layers.\1.video_mlp.gate_proj.weight",
+    r"text_model.video_cross_attention_layers.(\d+).feed_forward.w2.weight":                    r"language_model.model.layers.\1.video_mlp.down_proj.weight",
+    r"text_model.video_cross_attention_layers.(\d+).feed_forward.w3.weight":                    r"language_model.model.layers.\1.video_mlp.up_proj.weight",
+    r"text_model.video_cross_attention_layers.(\d+).ffn_norm.weight":                           r"language_model.model.layers.\1.video_post_attention_layernorm.weight",   
     # self attention layers
     r"text_model.layers.(\d+).attention.w(q|k|v|o).weight":                                     r"language_model.model.layers.\1.self_attn.\2_proj.weight",
     r"text_model.layers.(\d+).attention_norm.weight":                                           r"language_model.model.layers.\1.input_layernorm.weight",
@@ -205,6 +217,11 @@ def interpolate_positional_embedding(
     embeddings = torch.cat([cls_embedding, positional_embedding], dim=0)
     return embeddings
 
+# fusion sechedule reference: https://fburl.com/code/yz7fn5iz
+def get_fusion_schedule(text_num_layers, cross_attention_num_layers):
+    text_layers = list(range(text_num_layers))
+    k = math.ceil(len(text_layers) / cross_attention_num_layers)
+    return text_layers[::-1][::k][:cross_attention_num_layers][::-1]
 
 def write_model(
     model_path,
@@ -232,7 +249,13 @@ def write_model(
     text_num_heads = params["n_heads"]
     text_rms_norm_eps = params["norm_eps"]
     text_rope_theta = params["rope_theta"]
-    cross_attention_num_layers = params["vision_num_cross_attention_layers"]
+    is_video_model = "add_video_adapter" in params["vision_model"] and params["vision_model"]["add_video_adapter"]
+
+    if is_video_model:
+        cross_attention_num_layers = params["vision_model"]["cross_attention_adapter"]["num_layers"]
+        video_cross_attention_num_layers = params["vision_model"]["video_adapter"]["num_video_cross_attention"]
+    else:
+        cross_attention_num_layers = params["vision_num_cross_attention_layers"]
 
     # some constans from original code
     rope_scaling = {
@@ -259,16 +282,46 @@ def write_model(
         text_key_value_dim = text_dim
 
     # cross-attention layers: 20 for 90B, 8 for 11B
-    cross_attention_frequency = math.ceil(text_num_layers / cross_attention_num_layers)
-    text_num_total_layers = text_num_layers + cross_attention_num_layers
-    cross_attention_layers_shift = list(
-        range(cross_attention_frequency - 1, text_num_total_layers, cross_attention_frequency + 1)
-    )
-    self_attention_layers_shift = [k for k in range(text_num_total_layers) if k not in cross_attention_layers_shift]
+    # video cross-attention layers: 5 for 90B, 2 for 11B
+    if is_video_model:
+        cross_attention_fusion_schedule = get_fusion_schedule(text_num_layers, cross_attention_num_layers)
+        video_cross_attention_fusion_schedule = get_fusion_schedule(text_num_layers, video_cross_attention_num_layers)
+        cross_attention_layers_shift = []
+        video_cross_attention_layers_shift = []
+        self_attention_layers_shift = []
+        current_layer = 0
+        for i in range(text_num_layers):
+            if i in video_cross_attention_fusion_schedule:
+                video_cross_attention_layers_shift.append(current_layer)
+                current_layer += 1
+            if i in cross_attention_fusion_schedule:
+                cross_attention_layers_shift.append(current_layer)
+                current_layer += 1
+            self_attention_layers_shift.append(current_layer)
+            current_layer += 1
+        text_num_total_layers = text_num_layers + cross_attention_num_layers + video_cross_attention_num_layers
+        print(f"{cross_attention_fusion_schedule = }")
+        print(f"{video_cross_attention_fusion_schedule = }")
+        print(f"{cross_attention_layers_shift = }")
+        print(f"{video_cross_attention_layers_shift = }")
+        print(f"{self_attention_layers_shift = }")
+        assert current_layer == text_num_total_layers, f"current_layer: {current_layer} != text_num_total_layers: {text_num_total_layers}"
+    else:
+        cross_attention_frequency = math.ceil(text_num_layers / cross_attention_num_layers)
+        text_num_total_layers = text_num_layers + cross_attention_num_layers
+        cross_attention_layers_shift = list(
+            range(cross_attention_frequency - 1, text_num_total_layers, cross_attention_frequency + 1)
+        )
+        self_attention_layers_shift = [k for k in range(text_num_total_layers) if k not in cross_attention_layers_shift]
 
     bos_token_id = 128000
     eos_token_id = [128001, 128008, 128009] if instruct else 128001
     pad_token_id = 128004
+
+    if is_video_model:
+        cross_attention_layers = cross_attention_layers_shift + video_cross_attention_layers_shift
+    else:
+        cross_attention_layers = cross_attention_layers_shift
 
     text_config = MllamaTextConfig(
         num_attention_heads=text_num_heads,
@@ -277,7 +330,7 @@ def write_model(
         rms_norm_eps=text_rms_norm_eps,
         rope_theta=text_rope_theta,
         num_hidden_layers=text_num_total_layers,
-        cross_attention_layers=cross_attention_layers_shift,
+        cross_attention_layers=cross_attention_layers,
         intermediate_size=text_intermediate_size,
         max_position_embeddings=max_position_embeddings,
         rope_scaling=rope_scaling,
@@ -326,9 +379,23 @@ def write_model(
         torch_dtype=torch_dtype,
     )
 
+    if is_video_model:
+        vision_config.add_video_adapter = params["vision_model"]['add_video_adapter']
+        video_adapter_params = params["vision_model"]["video_adapter"]
+        vision_config.perceiver_input_dim = video_adapter_params["input_dim"]
+        vision_config.perceiver_dim = video_adapter_params["perceiver_dim"]
+        vision_config.perceiver_num_latents = video_adapter_params["perceiver_num_latents"]
+        vision_config.perceiver_num_layers = video_adapter_params["perceiver_num_layers"]
+        vision_config.perceiver_dim_head = video_adapter_params["perceiver_dim_head"]
+        vision_config.perceiver_heads = video_adapter_params["perceiver_heads"]
+        vision_config.perceiver_ff_mult = video_adapter_params["perceiver_ff_mult"]
+        vision_config.perceiver_add_post_tile_pos_embed = video_adapter_params["perceiver_add_post_tile_pos_embed"]
+        vision_config.perceiver_num_post_global_attention = video_adapter_params["perceiver_num_post_global_attention"]
+        vision_config.num_frames = video_adapter_params["num_frames"]
+        vision_config.frames_per_group = video_adapter_params["frames_per_group"]
+
     # save config
     config = MllamaConfig(vision_config=vision_config, text_config=text_config, torch_dtype=torch_dtype)
-    config.architectures = ["MllamaForConditionalGeneration"]
     config.save_pretrained(model_path)
     print("Model config saved successfully...")
 
@@ -356,8 +423,15 @@ def write_model(
         # In the original model, self-attention layers and cross-attention layers are different lists of layers.
         # In the converted model, they are merged into one list with corresponding index shift to preserve the order.
         if ("cross_attention" in key or "text_model.layers" in key) and "language_model" in new_key:
-            shift = cross_attention_layers_shift if "cross_attention" in key else self_attention_layers_shift
-            new_key = re.sub(r"layers.(\d+).", lambda _match: f"layers.{shift[int(_match.groups()[0])]}.", new_key)
+            if "video_cross_attention" in key:
+                shift = video_cross_attention_layers_shift
+                new_key = re.sub(r"layers.(\d+).video_", lambda _match: f"layers.{shift[int(_match.groups()[0])]}.", new_key) 
+            elif "cross_attention" in key:
+                shift = cross_attention_layers_shift
+                new_key = re.sub(r"layers.(\d+).", lambda _match: f"layers.{shift[int(_match.groups()[0])]}.", new_key) 
+            else:
+                shift = self_attention_layers_shift
+                new_key = re.sub(r"layers.(\d+).", lambda _match: f"layers.{shift[int(_match.groups()[0])]}.", new_key) 
 
         current_parameter = [chunk.pop(key).contiguous().clone() for chunk in loaded]
         if not is_param_different_across_shards(new_key):
@@ -560,6 +634,7 @@ def write_image_processor(config_path: str, save_dir: str):
     with open(config_path, "r") as f:
         params = json.load(f)
 
+    params = params["model"]
     tile_size = params["vision_chunk_size"]
     max_image_tiles = params["vision_max_num_chunks"]
 
