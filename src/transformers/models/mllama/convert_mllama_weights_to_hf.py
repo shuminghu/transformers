@@ -489,7 +489,6 @@ def write_model(
 
         elif "tile_positional_embedding.embedding" in new_key:
             state_dict[new_key] = pre_compute_positional_embedding(current_parameter)
-
         elif new_key != "":
             if isinstance(current_parameter, list):
                 current_parameter = torch.cat(current_parameter, dim=concat_dim)

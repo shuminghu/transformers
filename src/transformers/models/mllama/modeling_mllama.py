@@ -1437,23 +1437,25 @@ class MllamaVisionModel(MllamaPreTrainedModel):
         hidden_state = self.gated_positional_embedding(hidden_state, aspect_ratio_ids)
 
         hidden_state = self.layernorm_pre(hidden_state)
-
-        # Compute the number of tokens to pad
-        num_padding_patches = (8 - (hidden_state.shape[-2] % 8)) % 8
-        # Compute padding tuple for pad function
-        padding = (0, 0, 0, num_padding_patches)  # (pad_left, pad_right, pad_left for dim -2, pad_right for dim -2)
-        # Pad the tensor
-        hidden_state = F.pad(hidden_state, padding, mode="constant", value=0)
+    
+        num_padding_patches = 0
+        # # Compute the number of tokens to pad
+        # num_padding_patches = (8 - (hidden_state.shape[-2] % 8)) % 8
+        # # Compute padding tuple for pad function
+        # padding = (0, 0, 0, num_padding_patches)  # (pad_left, pad_right, pad_left for dim -2, pad_right for dim -2)
+        # # Pad the tensor
+        # hidden_state = F.pad(hidden_state, padding, mode="constant", value=0)
         slice_index = -num_padding_patches if num_padding_patches > 0 else None
 
-        # Prepare attention mask
-        attention_mask = aspect_ratio_mask.reshape(batch_size * num_concurrent_media, -1)
-        attention_mask = _prepare_aspect_ratio_attention_mask(
-            aspect_ratio_mask=attention_mask,
-            num_patches=self.num_patches,
-            target_length=hidden_state.shape[2],
-            dtype=self.dtype,
-        )
+        attention_mask = None
+        # # Prepare attention mask
+        # attention_mask = aspect_ratio_mask.reshape(batch_size * num_concurrent_media, -1)
+        # attention_mask = _prepare_aspect_ratio_attention_mask(
+        #     aspect_ratio_mask=attention_mask,
+        #     num_patches=self.num_patches,
+        #     target_length=hidden_state.shape[2],
+        #     dtype=self.dtype,
+        # )
 
         # Apply encoder
         hidden_state = hidden_state.view(batch_size * num_concurrent_media, -1, dim)

@@ -33,6 +33,8 @@ from .image_processing_mllama import make_list_of_images
 
 class MllamaImagesKwargs(ImagesKwargs, total=False):
     max_image_tiles: Optional[int]
+    num_frames: Optional[int]
+    frames_per_group: Optional[int]
 
 
 class MllamaProcessorKwargs(ProcessingKwargs, total=False):
@@ -41,6 +43,8 @@ class MllamaProcessorKwargs(ProcessingKwargs, total=False):
     _defaults = {
         "image_kwargs": {
             "max_image_tiles": 4,
+            "num_frames": 0,
+            "frames_per_group": 0,
         },
     }
 
@@ -297,13 +301,13 @@ class MllamaProcessor(ProcessorMixin):
                 raise ValueError(
                     "If a batch of text is provided, there should be either no images or at least one image per sample"
                 )
-            if sum(n_images_in_images) != sum(n_images_in_text):
-                if images is None:
-                    raise ValueError("No image were provided, but there are image tokens in the prompt")
-                else:
-                    raise ValueError(
-                        f"The number of image token ({sum(n_images_in_images)}) should be the same as in the number of provided images ({sum(n_images_in_images)})"
-                    )
+            # if sum(n_images_in_images) != sum(n_images_in_text):
+            #     if images is None:
+            #         raise ValueError("No image were provided, but there are image tokens in the prompt")
+            #     else:
+            #         raise ValueError(
+            #             f"The number of image token ({sum(n_images_in_images)}) should be the same as in the number of provided images ({sum(n_images_in_images)})"
+            #         )
 
         if images is not None:
             image_features = self.image_processor(images, **images_kwargs)

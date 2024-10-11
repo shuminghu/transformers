@@ -43,6 +43,7 @@ class MPPerceiverAttention(nn.Module):
         super().__init__()
         self.scale = dim_head**-0.5
         self.heads = heads
+        self.dim_head = dim_head
         inner_dim = dim_head * heads
 
         self.norm_media = LayerNorm(dim)
@@ -75,7 +76,20 @@ class MPPerceiverAttention(nn.Module):
         kv_input = torch.cat((x, latents), dim=-2)
         k, v = self.to_kv(kv_input).chunk(2, dim=-1)
 
+        bs, slen, _ = q.shape
+
+        q = q.view(bs, slen, h, self.dim_head)
+        k = k.view(bs, k.shape[1], h, self.dim_head)
+        v = v.view(bs, v.shape[1], h, self.dim_head)
+
+        q = q.transpose(1, 2)
+        k = k.transpose(1, 2)
+        v = v.transpose(1, 2)
+
         out = F.scaled_dot_product_attention(q, k, v, dropout_p=0.0, is_causal=False)
+
+        out = out.transpose(1, 2).contiguous()
+        out = out.view(bs, slen, -1)
 
         out = self.to_out(out)
 
